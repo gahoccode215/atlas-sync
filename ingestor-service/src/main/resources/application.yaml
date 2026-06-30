@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: ingestor-service
+  main:
+    web-application-type: none
+
+ingestor:
+  zendesk:
+    base-url: https://support.optisigns.com/api/v2/help_center
+    locale: en-us
+    per-page: 100
+  output:
+    dir: ./articles
+  min-articles: 30
