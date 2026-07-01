@@ -31,12 +31,8 @@ public class MarkdownConverterService {
         Document doc = Jsoup.parse(rawHtml);
         doc.outputSettings().prettyPrint(false);
         doc.select("script, style, iframe, nav, footer").remove();
-
-        // Tự chuyển <pre><code>...</code></pre> hoặc <pre>...</pre> thành
-        // placeholder text dạng fenced code block, vì Flexmark không nhận diện
-        // đúng cấu trúc preformatted sau khi qua Jsoup.
         for (Element pre : doc.select("pre")) {
-            String codeText = pre.text(); // lấy text thuần, không escape HTML
+            String codeText = pre.text();
             String fenced = "\n```\n" + codeText + "\n```\n";
             pre.replaceWith(new TextNode(fenced));
         }

@@ -24,10 +24,6 @@ public class ZendeskClient {
         this.restClient = RestClient.create();
     }
 
-    /**
-     * Lấy toàn bộ article (đã publish, không phải draft) bằng cách
-     * lặp qua các trang Zendesk trả về cho tới khi hết next_page.
-     */
     public List<ZendeskArticle> fetchAllArticles() {
         List<ZendeskArticle> result = new ArrayList<>();
 

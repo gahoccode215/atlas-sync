@@ -27,10 +27,6 @@ public class FileWriterService {
         this.markdownConverterService = markdownConverterService;
     }
 
-    /**
-     * Convert 1 article Zendesk sang Markdown có frontmatter, ghi ra file <slug>.md.
-     * Trả về đường dẫn file đã ghi.
-     */
     public Path writeArticle(ZendeskArticle article) {
         String markdownBody = markdownConverterService.convert(article.getBody());
         String frontMatter = buildFrontMatter(article);
@@ -69,7 +65,6 @@ public class FileWriterService {
 
     private String escapeYaml(String text) {
         if (text == null) return "";
-        // Bọc trong dấu nháy nếu chứa ký tự đặc biệt YAML (":" là phổ biến nhất trong title)
         if (text.contains(":") || text.contains("\"")) {
             return "\"" + text.replace("\"", "\\\"") + "\"";
         }
@@ -81,9 +76,9 @@ public class FileWriterService {
             return "untitled";
         }
         String normalized = Normalizer.normalize(title, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", ""); // bỏ dấu tiếng Việt/accent nếu có
+                .replaceAll("\\p{M}", "");
         String lower = normalized.toLowerCase().trim();
         String slug = NON_ALPHANUMERIC.matcher(lower).replaceAll("-");
-        return slug.replaceAll("^-+|-+$", ""); // bỏ dấu - thừa ở đầu/cuối
+        return slug.replaceAll("^-+|-+$", "");
     }
 }

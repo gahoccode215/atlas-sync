@@ -1,36 +1,44 @@
-# ── Stage 1: Build Java jar ───────────────────────────────────────────────────
-FROM maven:3.9.6-eclipse-temurin-21 AS java-build
+# ============================================================
+# Stage 1 – Build Java JAR
+# ============================================================
+FROM maven:3.9-eclipse-temurin-21-slim AS java-build
 
 WORKDIR /build
-COPY ingestor-service/ .
+
+# Copy pom.xml trước để Docker cache layer dependency
+COPY ingestor-service/pom.xml ./pom.xml
+RUN mvn dependency:go-offline -q
+
+# Copy source rồi build
+COPY ingestor-service/src ./src
 RUN mvn clean package -DskipTests -q
 
-# ── Stage 2: Runtime (Java + Python) ─────────────────────────────────────────
+# ============================================================
+# Stage 2 – Runtime: JRE 21 + Python 3
+# ============================================================
 FROM eclipse-temurin:21-jre-jammy
 
-# Cài Python
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip \
+# Cài Python 3 + pip (apt cache cleanup để giảm image size)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy jar từ stage 1
-COPY --from=java-build /build/target/*.jar ./ingestor-service.jar
+# JAR từ stage 1
+COPY --from=java-build /build/target/*.jar ingestor.jar
 
-# Copy Python scripts
-COPY optibot-uploader/requirements.txt .
+# Python dependencies (copy requirements trước để cache)
+COPY optibot-uploader/requirements.txt ./requirements.txt
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY optibot-uploader/main.py .
-COPY optibot-uploader/build_vectorstore.py .
+# Python scripts
+COPY optibot-uploader/main.py               ./main.py
+COPY optibot-uploader/upload_to_vector_store.py ./upload_to_vector_store.py
 
-# Tạo thư mục data
-RUN mkdir -p articles chroma_db
+# Thư mục articles dùng chung giữa Java và Python
+ENV ARTICLES_DIR=/app/articles
+ENV JAR_PATH=/app/ingestor.jar
 
-ENV ARTICLES_DIR=./articles
-ENV CHROMA_DIR=./chroma_db
-ENV STATE_FILE=./state.json
-ENV JAR_PATH=./ingestor-service.jar
-
+# Chạy pipeline: scrape → upload
 CMD ["python3", "main.py"]

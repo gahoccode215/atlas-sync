@@ -1,173 +1,100 @@
 """
-OptiBot Daily Job - Orchestrator
-1. Chạy Java scraper (Spring Boot jar)
-2. Detect delta (hash comparison)
-3. Upload only new/updated lên ChromaDB
-Log: added, updated, skipped, failed
+main.py — Daily sync pipeline
+  1. Chạy Java ingestor JAR để scrape Zendesk → .md files
+  2. Upload delta lên OpenAI Vector Store
+
+Dùng trong Docker:
+  docker run -e OPENAI_API_KEY=sk-... ghcr.io/<you>/<repo>:latest
 """
 
+import logging
 import os
-import sys
-import json
-import hashlib
-import pathlib
 import subprocess
-import time
-import chromadb
-from chromadb.utils import embedding_functions
+import sys
+from pathlib import Path
+
 from dotenv import load_dotenv
+from openai import OpenAI
 
-load_dotenv()
+from upload_to_vector_store import get_or_create_vector_store, upload
 
-# ── Config ────────────────────────────────────────────────────────────────────
-ARTICLES_DIR  = pathlib.Path(os.getenv("ARTICLES_DIR", "./articles"))
-STATE_FILE    = pathlib.Path(os.getenv("STATE_FILE", "./state.json"))
-CHROMA_DIR    = os.getenv("CHROMA_DIR", "./chroma_db")
-COLLECTION    = "optisigns_docs"
-CHUNK_SIZE    = 800
-CHUNK_OVERLAP = 100
-JAR_PATH      = pathlib.Path(os.getenv("JAR_PATH", "./ingestor-service.jar"))
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+log = logging.getLogger(__name__)
 
-def log(msg): print(msg, flush=True)
+ARTICLES_DIR = Path(os.getenv("ARTICLES_DIR", "/app/articles"))
+JAR_PATH     = Path(os.getenv("JAR_PATH", "/app/ingestor.jar"))
 
-# ── Bước 1: Chạy Java scraper ─────────────────────────────────────────────────
-def run_java_scraper():
-    log("\n── Step 1: Running Java scraper ──")
+
+# ---------------------------------------------------------------------------
+# Step 1 – Java scraper
+# ---------------------------------------------------------------------------
+
+def run_scraper():
+    log.info("━━━ STEP 1: Scraping Zendesk articles ━━━")
+    ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
+
     cmd = [
-        "java", "-jar", str(JAR_PATH),
-        f"--ingestor.output.dir={ARTICLES_DIR}"
+        "java",
+        # Override Spring Boot property so JAR writes to the shared dir
+        f"-Dingestor.output.dir={ARTICLES_DIR}",
+        "-jar", str(JAR_PATH),
     ]
-    result = subprocess.run(cmd, capture_output=False, text=True)
+    log.info("Running: %s", " ".join(cmd))
+
+    result = subprocess.run(cmd, text=True, timeout=3600)
+
     if result.returncode != 0:
-        log(f"❌ Java scraper failed (exit {result.returncode})")
+        log.error("Scraper exited with code %d — aborting.", result.returncode)
         sys.exit(1)
-    md_files = list(ARTICLES_DIR.glob("*.md"))
-    log(f"✓ Scraper done: {len(md_files)} files in {ARTICLES_DIR}")
-    return md_files
 
-# ── Bước 2: Delta detection ───────────────────────────────────────────────────
-def load_state() -> dict:
-    if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    return {}
+    md_count = len(list(ARTICLES_DIR.glob("*.md")))
+    log.info("Scraper done. Articles on disk: %d", md_count)
 
-def save_state(state: dict):
-    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
-def md5(text: str) -> str:
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
+# ---------------------------------------------------------------------------
+# Step 2 – Upload delta
+# ---------------------------------------------------------------------------
 
-# ── Bước 3: Chunking + upload ─────────────────────────────────────────────────
-def chunk_text(text: str) -> list[str]:
-    chunks, start = [], 0
-    while start < len(text):
-        chunks.append(text[start:start + CHUNK_SIZE])
-        start += CHUNK_SIZE - CHUNK_OVERLAP
-    return chunks
+def run_uploader():
+    log.info("━━━ STEP 2: Uploading delta to Vector Store ━━━")
 
-def get_source_url(content: str) -> str:
-    for line in content.splitlines():
-        if line.startswith("source_url:"):
-            return line.split("source_url:", 1)[-1].strip()
-    return ""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        log.error("OPENAI_API_KEY not set.")
+        sys.exit(1)
 
-def upload_delta(md_files: list[pathlib.Path], state: dict, collection) -> dict:
-    log(f"\n── Step 2: Delta detection & upload ──")
+    vs_name = os.getenv("VECTOR_STORE_NAME", "optibot-knowledge-base")
+    client  = OpenAI(api_key=api_key)
+    vs      = get_or_create_vector_store(client, vs_name)
+    result  = upload(client, vs.id, ARTICLES_DIR)
 
-    added = updated = skipped = failed = 0
+    # upload() returns (manifest, skipped) or (manifest, skipped, completed, chunks)
+    if len(result) == 2:
+        manifest, skipped = result
+        completed = chunks_est = 0
+    else:
+        manifest, skipped, completed, chunks_est = result
 
-    for md_file in md_files:
-        try:
-            content      = md_file.read_text(encoding="utf-8")
-            file_hash    = md5(content)
-            file_id      = md_file.stem   # slug-articleid
-            prev         = state.get(file_id, {})
+    # ── Final summary (đề bài yêu cầu log added/updated/skipped) ──
+    print()
+    print("=" * 55)
+    print("  DAILY SYNC COMPLETE")
+    print("-" * 55)
+    print(f"  Articles on disk   : {len(list(ARTICLES_DIR.glob('*.md')))}")
+    print(f"  Uploaded (delta)   : {completed}")
+    print(f"  Skipped (no change): {skipped}")
+    print(f"  Total tracked      : {len(manifest)}")
+    print(f"  Est. chunks embed  : {chunks_est}")
+    print(f"  Vector Store       : {vs.id}")
+    print("=" * 55)
 
-            if prev.get("hash") == file_hash:
-                skipped += 1
-                continue
 
-            is_new    = file_id not in state
-            source_url = get_source_url(content)
-            chunks    = chunk_text(content)
-
-            collection.upsert(
-                ids=[f"{file_id}_chunk_{j}" for j in range(len(chunks))],
-                documents=chunks,
-                metadatas=[{
-                    "source_url": source_url,
-                    "filename":   md_file.name,
-                    "chunk_index": j
-                } for j in range(len(chunks))]
-            )
-
-            state[file_id] = {"hash": file_hash}
-
-            if is_new:
-                added += 1
-                log(f"  [ADD] {md_file.name}")
-            else:
-                updated += 1
-                log(f"  [UPD] {md_file.name}")
-
-        except Exception as e:
-            log(f"  [ERR] {md_file.name}: {e}")
-            failed += 1
-
-    return {"added": added, "updated": updated,
-            "skipped": skipped, "failed": failed}
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-def main():
-    start_time = time.time()
-    log("═"*50)
-    log("OptiBot Daily Job starting...")
-    log("═"*50)
-
-    # Step 1: Scrape
-    md_files = run_java_scraper()
-
-    # Step 2 & 3: Delta + upload
-    state = load_state()
-
-    chroma = chromadb.PersistentClient(path=CHROMA_DIR)
-    ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
-    )
-    collection = chroma.get_or_create_collection(
-        name=COLLECTION,
-        embedding_function=ef,
-        metadata={"hnsw:space": "cosine"}
-    )
-
-    counts = upload_delta(md_files, state, collection)
-    save_state(state)
-
-    elapsed = time.time() - start_time
-    log(f"""
-{'═'*50}
-── Daily job complete ({elapsed:.1f}s) ──
-  added   : {counts['added']}
-  updated : {counts['updated']}
-  skipped : {counts['skipped']}
-  failed  : {counts['failed']}
-  total   : {len(md_files)}
-{'═'*50}""")
-
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    main()
-
-# Ghi log ra file để GitHub Actions upload artifact
-import datetime
-log_path = pathlib.Path("job_log.txt")
-log_content = f"""OptiBot Daily Job Log
-=====================
-Run time : {datetime.datetime.utcnow().isoformat()} UTC
-Added    : {counts['added']}
-Updated  : {counts['updated']}
-Skipped  : {counts['skipped']}
-Failed   : {counts['failed']}
-Total    : {len(md_files)}
-"""
-log_path.write_text(log_content)
-log(f"Log saved to {log_path}")
+    load_dotenv()
+    run_scraper()
+    run_uploader()
