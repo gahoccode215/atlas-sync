@@ -2,21 +2,67 @@ name: OptiBot Daily Sync
 
 on:
   schedule:
-    - cron: '0 2 * * *'
-  workflow_dispatch:        # cho phép chạy thủ công
+    - cron: '0 2 * * *'   # 2:00 AM UTC mỗi ngày
+  workflow_dispatch:        # chạy thủ công từ GitHub UI
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Build Docker image
-        run: docker build -t optibot-sync .
+      # ── Setup Java để chạy scraper ──────────────────────────
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'   # cache Maven dependencies giữa các lần chạy
 
-      - name: Run sync
+      # ── Setup Python để chạy uploader ───────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r optibot-uploader/requirements.txt
+
+      # ── Restore manifest từ lần chạy trước ─────────────────
+      # Đây là chìa khóa để delta detection hoạt động:
+      # manifest.json ghi nhớ hash của từng file đã upload,
+      # nên lần chạy sau chỉ upload file mới/thay đổi.
+      - name: Restore manifest cache
+        uses: actions/cache/restore@v4
+        with:
+          path: optibot-uploader/.manifest.json
+          key: optibot-manifest-${{ github.run_id }}
+          restore-keys: |
+            optibot-manifest-
+
+      # ── STEP 1: Chạy Java scraper ───────────────────────────
+      - name: Step 1 - Scrape Zendesk articles
         run: |
-          docker run --rm \
-            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-            -e VECTOR_STORE_NAME=optibot-knowledge-base \
-            optibot-sync
+          cd ingestor-service
+          mvn clean package -DskipTests -q
+          java -jar target/*.jar
+        # Spring Boot đọc application.yaml → output vào ingestor-service/articles/
+
+      # ── STEP 2: Upload delta lên Vector Store ───────────────
+      - name: Step 2 - Upload delta to Vector Store
+        run: python optibot-uploader/upload_to_vector_store.py
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MARKDOWN_DIR: ingestor-service/articles
+          VECTOR_STORE_NAME: optibot-knowledge-base
+
+      # ── Lưu manifest cho lần chạy tiếp theo ────────────────
+      - name: Save manifest cache
+        uses: actions/cache/save@v4
+        if: always()   # lưu kể cả khi step trên fail
+        with:
+          path: optibot-uploader/.manifest.json
+          key: optibot-manifest-${{ github.run_id }}
