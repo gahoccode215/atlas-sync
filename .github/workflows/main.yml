@@ -1,0 +1,22 @@
+name: OptiBot Daily Sync
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:        # cho phép chạy thủ công
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t optibot-sync .
+
+      - name: Run sync
+        run: |
+          docker run --rm \
+            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            -e VECTOR_STORE_NAME=optibot-knowledge-base \
+            optibot-sync
