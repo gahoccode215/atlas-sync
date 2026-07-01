@@ -156,3 +156,18 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Ghi log ra file để GitHub Actions upload artifact
+import datetime
+log_path = pathlib.Path("job_log.txt")
+log_content = f"""OptiBot Daily Job Log
+=====================
+Run time : {datetime.datetime.utcnow().isoformat()} UTC
+Added    : {counts['added']}
+Updated  : {counts['updated']}
+Skipped  : {counts['skipped']}
+Failed   : {counts['failed']}
+Total    : {len(md_files)}
+"""
+log_path.write_text(log_content)
+log(f"Log saved to {log_path}")

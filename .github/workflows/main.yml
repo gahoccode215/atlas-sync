@@ -2,8 +2,8 @@ name: OptiBot Daily Scraper
 
 on:
   schedule:
-    - cron: '0 2 * * *'   # 2AM UTC mỗi ngày
-  workflow_dispatch:        # cho phép chạy thủ công để test
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 jobs:
   run-optibot:
@@ -44,10 +44,18 @@ jobs:
       - name: Run daily job
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          ARTICLES_DIR: ../ingestor-service/articles
-          CHROMA_DIR: ./chroma_db
-          STATE_FILE: ./state.json
-          JAR_PATH: ../ingestor-service/target/ingestor-service-0.0.1-SNAPSHOT.jar
+          ARTICLES_DIR: ${{ github.workspace }}/ingestor-service/articles
+          CHROMA_DIR: ${{ github.workspace }}/optibot-uploader/chroma_db
+          STATE_FILE: ${{ github.workspace }}/optibot-uploader/state.json
+          JAR_PATH: ${{ github.workspace }}/ingestor-service/target/ingestor-service-0.0.1-SNAPSHOT.jar
         run: |
           cd optibot-uploader
-          python main.py
+          python main.py 2>&1 | tee job_log.txt
+
+      - name: Upload log artifact
+        if: always()    # upload kể cả khi job fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-log-${{ github.run_number }}
+          path: optibot-uploader/job_log.txt
+          retention-days: 30
