@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1 – Build Java JAR
 # ============================================================
-FROM maven:3.9-eclipse-temurin-21-slim AS java-build
+FROM maven:3.9-eclipse-temurin-21 AS java-build
 
 WORKDIR /build
 
