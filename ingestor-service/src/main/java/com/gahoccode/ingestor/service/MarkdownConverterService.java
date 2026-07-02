@@ -31,6 +31,7 @@ public class MarkdownConverterService {
         Document doc = Jsoup.parse(rawHtml);
         doc.outputSettings().prettyPrint(false);
         doc.select("script, style, iframe, nav, footer").remove();
+        doc.select("img").remove();
         for (Element pre : doc.select("pre")) {
             String codeText = pre.text();
             String fenced = "\n```\n" + codeText + "\n```\n";
