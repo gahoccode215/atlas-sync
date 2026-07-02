@@ -47,5 +47,4 @@ Runs every day at 02:00 UTC via GitHub Actions.
 
 > **Q: How do I add a YouTube video?**
 
-![OptiBot answering "How do I add a YouTube video?"]
 ![Source code and test script](https://github.com/gahoccode215/atlas-sync/blob/main/screenshots/quick-sanity.png)

@@ -2,8 +2,8 @@ name: OptiBot Daily Sync
 
 on:
   schedule:
-    - cron: '0 2 * * *'   # 2:00 AM UTC mỗi ngày
-  workflow_dispatch:        # chạy thủ công từ GitHub UI
+    - cron: "0 * * * *"
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -14,27 +14,21 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ── Setup Java để chạy scraper ──────────────────────────
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'   # cache Maven dependencies giữa các lần chạy
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
 
-      # ── Setup Python để chạy uploader ───────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install Python dependencies
         run: pip install -r optibot-uploader/requirements.txt
 
-      # ── Restore manifest từ lần chạy trước ─────────────────
-      # Đây là chìa khóa để delta detection hoạt động:
-      # manifest.json ghi nhớ hash của từng file đã upload,
-      # nên lần chạy sau chỉ upload file mới/thay đổi.
       - name: Restore manifest cache
         uses: actions/cache/restore@v4
         with:
@@ -43,15 +37,12 @@ jobs:
           restore-keys: |
             optibot-manifest-
 
-      # ── STEP 1: Chạy Java scraper ───────────────────────────
       - name: Step 1 - Scrape Zendesk articles
         run: |
           cd ingestor-service
           mvn clean package -DskipTests -q
           java -jar target/*.jar
-        # Spring Boot đọc application.yaml → output vào ingestor-service/articles/
 
-      # ── STEP 2: Upload delta lên Vector Store ───────────────
       - name: Step 2 - Upload delta to Vector Store
         run: python optibot-uploader/upload_to_vector_store.py
         env:
@@ -59,10 +50,9 @@ jobs:
           MARKDOWN_DIR: ingestor-service/articles
           VECTOR_STORE_NAME: optibot-knowledge-base
 
-      # ── Lưu manifest cho lần chạy tiếp theo ────────────────
       - name: Save manifest cache
         uses: actions/cache/save@v4
-        if: always()   # lưu kể cả khi step trên fail
+        if: always()
         with:
           path: optibot-uploader/.manifest.json
           key: optibot-manifest-${{ github.run_id }}
