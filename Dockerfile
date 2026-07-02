@@ -5,17 +5,16 @@ FROM maven:3.9-eclipse-temurin-21 AS java-build
 
 WORKDIR /build
 
-# Copy pom.xml trước để Docker cache layer dependency
 COPY ingestor-service/pom.xml ./pom.xml
 RUN mvn dependency:go-offline -q
 
-# Copy source rồi build
 COPY ingestor-service/src ./src
 RUN mvn clean package -DskipTests -q
 
 # ============================================================
 # Stage 2 – Runtime: JRE 21 Alpine + Python 3
 # ============================================================
+
 FROM eclipse-temurin:21-jre-alpine
 
 RUN apk add --no-cache python3 py3-pip
