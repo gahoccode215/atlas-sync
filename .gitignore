@@ -19,5 +19,4 @@ optibot-uploader/.env
 # OS
 .DS_Store
 Thumbs.db
-/optibot-uploader/.env.sample
 /optibot-uploader/.env
